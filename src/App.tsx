@@ -1,0 +1,253 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Background,
+  Controls,
+  MarkerType,
+  MiniMap,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
+import { confirmDelete, emptyProject, useStore } from './store'
+import { exampleProject } from './example'
+import { stopSimulation } from './simulate'
+import type { Project } from './types'
+import SkillNodeView from './components/SkillNodeView'
+import ConditionEdge from './components/ConditionEdge'
+import Inspector from './components/Inspector'
+import SimPanel from './components/SimPanel'
+import ConnectorsDialog from './components/ConnectorsDialog'
+import ExportDialog from './components/ExportDialog'
+import { download, slug } from './exporter'
+import { importFiles } from './importer'
+import { canPickDirectory, pickDirectory, readFileList, readZip, type ReadResult } from './folderReader'
+
+const nodeTypes = { skill: SkillNodeView }
+const edgeTypes = { condition: ConditionEdge }
+const arrow = { type: MarkerType.ArrowClosed, width: 18, height: 18 }
+
+function parseProject(text: string): Project {
+  const p = JSON.parse(text) as Project
+  if (p?.version !== 1 || !Array.isArray(p.nodes) || !Array.isArray(p.edges) || typeof p.connectors !== 'object')
+    throw new Error('Not a Harness Studio harness.json file')
+  return p
+}
+
+function Studio() {
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addSkill, select, name, loadProject, toProject } = useStore()
+  const { screenToFlowPosition, fitView } = useReactFlow()
+  const [dialog, setDialog] = useState<{ kind: 'connectors'; id?: string } | { kind: 'export' } | null>(null)
+  const importInput = useRef<HTMLInputElement>(null)
+  const folderInput = useRef<HTMLInputElement>(null)
+  const zipInput = useRef<HTMLInputElement>(null)
+  const [notice, setNotice] = useState<{ title: string; lines: string[]; error?: boolean } | null>(null)
+  const [saveFailed, setSaveFailed] = useState(false)
+
+  useEffect(() => {
+    const failed = () => setSaveFailed(true)
+    const ok = () => setSaveFailed(false)
+    window.addEventListener('harness-studio:save-failed', failed)
+    window.addEventListener('harness-studio:saved', ok)
+    return () => {
+      window.removeEventListener('harness-studio:save-failed', failed)
+      window.removeEventListener('harness-studio:saved', ok)
+    }
+  }, [])
+  const shownEdges = useMemo(() => edges.map((e) => ({ ...e, markerEnd: arrow })), [edges])
+  const closeDialog = useCallback(() => setDialog(null), [])
+
+  // One delete path for keys, buttons and the canvas ✕, so the store's selection is the source of truth.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const t = e.target as HTMLElement
+      if (dialog || t.closest('input, textarea, select, [contenteditable="true"]')) return
+      e.preventDefault()
+      confirmDelete()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [dialog])
+
+  const load = (p: Project) => {
+    stopSimulation()
+    setNotice(null)
+    loadProject(p)
+    setTimeout(() => fitView({ padding: 0.2 }), 50)
+  }
+
+  const runImport = async (read: () => Promise<ReadResult | null>) => {
+    try {
+      const r = await read()
+      if (!r) return
+      if (!r.files.length) throw new Error('No readable text files were found there.')
+      if (nodes.length && !confirm(`Replace the current harness with “${r.name}”? Save it first if you want to keep it.`)) return
+      const { project, notes } = importFiles(r.files, r.name)
+      load(project)
+      const skipped = r.skipped
+        ? [`Skipped ${r.skipped} file${r.skipped > 1 ? 's' : ''}: binaries, build output, very large or secret-looking files.`]
+        : []
+      setNotice({ title: `Imported “${r.name}”`, lines: [...notes, ...skipped] })
+    } catch (err) {
+      setNotice({ title: 'Import failed', lines: [(err as Error).message], error: true })
+    }
+  }
+
+  return (
+    <div className="app">
+      <header className="toolbar">
+        <div className="brand">
+          <img src="/icon.svg" alt="" width={22} height={22} />
+          <span>Harness Studio</span>
+          <span className="project-name">/ {name}</span>
+        </div>
+        <span className="spacer" />
+        <button className="primary" onClick={() => addSkill('New skill')}>
+          + Add skill
+        </button>
+        <button onClick={() => setDialog({ kind: 'connectors' })}>Connectors</button>
+        <div className="menu">
+          <button>File ▾</button>
+          <div className="menu__items">
+            <button
+              onClick={() => {
+                if (confirm('Start a new harness? The current one is replaced (export it first to keep it).')) load(emptyProject())
+              }}
+            >
+              New harness
+            </button>
+            <button onClick={() => (canPickDirectory() ? runImport(pickDirectory) : folderInput.current?.click())}>
+              Import skill folder…
+            </button>
+            <button onClick={() => zipInput.current?.click()}>Import skill .zip…</button>
+            <button onClick={() => importInput.current?.click()}>Open harness.json…</button>
+            <button onClick={() => download(`${slug(name)}.harness.json`, JSON.stringify(toProject(), null, 2), 'application/json')}>
+              Save harness.json
+            </button>
+            <button
+              onClick={() => {
+                if (confirm('Load the example? The current harness is replaced.')) load(exampleProject())
+              }}
+            >
+              Load example
+            </button>
+          </div>
+        </div>
+        <button className="accent" onClick={() => setDialog({ kind: 'export' })}>
+          Generate skill
+        </button>
+        <input
+          ref={importInput}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={async (e) => {
+            const f = e.target.files?.[0]
+            e.target.value = ''
+            if (!f) return
+            try {
+              load(parseProject(await f.text()))
+            } catch (err) {
+              alert((err as Error).message)
+            }
+          }}
+        />
+        <input
+          ref={folderInput}
+          type="file"
+          hidden
+          {...{ webkitdirectory: '', directory: '' }}
+          onChange={(e) => {
+            const list = e.target.files
+            if (list?.length) runImport(() => readFileList(list)).finally(() => (e.target.value = ''))
+          }}
+        />
+        <input
+          ref={zipInput}
+          type="file"
+          accept=".zip,application/zip"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) runImport(() => readZip(f)).finally(() => (e.target.value = ''))
+          }}
+        />
+      </header>
+
+      <main className="workspace">
+        <div className="canvas">
+          <ReactFlow
+            nodes={nodes}
+            edges={shownEdges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={(_, n) => select({ kind: 'node', id: n.id })}
+            onEdgeClick={(_, e) => select({ kind: 'edge', id: e.id })}
+            onPaneClick={() => select(null)}
+            onDoubleClick={(e) => {
+              if (!(e.target as HTMLElement).classList.contains('react-flow__pane')) return
+              addSkill('New skill', screenToFlowPosition({ x: e.clientX - 100, y: e.clientY - 30 }))
+            }}
+            zoomOnDoubleClick={false}
+            deleteKeyCode={null}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background gap={20} />
+            <Controls />
+            <MiniMap pannable zoomable className="minimap" />
+          </ReactFlow>
+          {!nodes.length && (
+            <div className="empty">
+              <p>Your canvas is empty.</p>
+              <p className="muted">Click “+ Add skill” or double-click anywhere to drop your first skill.</p>
+            </div>
+          )}
+          {(notice || saveFailed) && (
+            <div className="notices">
+              {notice && (
+                <div className={`notice ${notice.error ? 'notice--error' : ''}`} role="status">
+                  <div className="row">
+                    <b>{notice.title}</b>
+                    <span className="spacer" />
+                    <button className="small" onClick={() => setNotice(null)} aria-label="Dismiss">
+                      ✕
+                    </button>
+                  </div>
+                  <ul>
+                    {notice.lines.map((l) => (
+                      <li key={l}>{l}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {saveFailed && (
+                <div className="notice notice--error" role="alert">
+                  This harness is too big for the browser's autosave. Use File → Save harness.json to keep your changes.
+                </div>
+              )}
+            </div>
+          )}
+          <SimPanel />
+        </div>
+        <Inspector onOpenConnectors={(id) => setDialog({ kind: 'connectors', id })} />
+      </main>
+
+      {dialog?.kind === 'connectors' && <ConnectorsDialog initialId={dialog.id} onClose={closeDialog} />}
+      {dialog?.kind === 'export' && <ExportDialog onClose={closeDialog} />}
+    </div>
+  )
+}
+
+export default function App() {
+  return (
+    <ReactFlowProvider>
+      <Studio />
+    </ReactFlowProvider>
+  )
+}
