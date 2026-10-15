@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { confirmDelete, useStore } from '../store'
+import { isNameTaken, useWorkflows } from '../workflows'
 import { missingConnectors } from '../connectors'
 import type { SkillNode } from '../types'
 
@@ -17,12 +18,16 @@ export default function Inspector({ onOpenConnectors }: { onOpenConnectors: (id?
 
 function ProjectInspector({ onOpenConnectors }: { onOpenConnectors: (id?: string) => void }) {
   const { name, description, nodes, edges, connectors, setMeta } = useStore()
+  const currentId = useWorkflows((s) => s.currentId)
+  useWorkflows((s) => s.list) // re-check the name when the list changes
+  const duplicate = isNameTaken(name, currentId ?? undefined)
   return (
     <div className="inspector">
-      <h2>Harness</h2>
+      <h2>Workflow</h2>
       <label>
         Name
         <input value={name} onChange={(e) => setMeta({ name: e.target.value })} />
+        {duplicate && <span className="hint warn-text">Another workflow already has this name.</span>}
       </label>
       <label>
         Description <span className="hint">becomes the skill's trigger description</span>

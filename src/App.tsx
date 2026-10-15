@@ -9,9 +9,10 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { confirmDelete, emptyProject, useStore } from './store'
+import { confirmDelete, useStore } from './store'
 import { exampleProject } from './example'
-import { stopSimulation } from './simulate'
+import { createWorkflow, initWorkflows, newWorkflow, useWorkflows } from './workflows'
+import WorkflowList from './components/WorkflowList'
 import type { Project } from './types'
 import SkillNodeView from './components/SkillNodeView'
 import ConditionEdge from './components/ConditionEdge'
@@ -35,25 +36,25 @@ function parseProject(text: string): Project {
 }
 
 function Studio() {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addSkill, select, name, loadProject, toProject } = useStore()
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addSkill, select, name, toProject } = useStore()
+  const { ready, currentId } = useWorkflows()
+  const [showList, setShowList] = useState(() => window.innerWidth > 900)
   const { screenToFlowPosition, fitView } = useReactFlow()
   const [dialog, setDialog] = useState<{ kind: 'connectors'; id?: string } | { kind: 'export' } | null>(null)
   const importInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
   const zipInput = useRef<HTMLInputElement>(null)
   const [notice, setNotice] = useState<{ title: string; lines: string[]; error?: boolean } | null>(null)
-  const [saveFailed, setSaveFailed] = useState(false)
 
   useEffect(() => {
-    const failed = () => setSaveFailed(true)
-    const ok = () => setSaveFailed(false)
-    window.addEventListener('harness-studio:save-failed', failed)
-    window.addEventListener('harness-studio:saved', ok)
-    return () => {
-      window.removeEventListener('harness-studio:save-failed', failed)
-      window.removeEventListener('harness-studio:saved', ok)
-    }
+    initWorkflows().catch((e: Error) => setNotice({ title: 'Could not open saved workflows', lines: [e.message], error: true }))
   }, [])
+
+  // Frame the graph whenever a different workflow opens.
+  useEffect(() => {
+    if (currentId) setTimeout(() => fitView({ padding: 0.2 }), 50)
+  }, [currentId, fitView])
+
   const shownEdges = useMemo(() => edges.map((e) => ({ ...e, markerEnd: arrow })), [edges])
   const closeDialog = useCallback(() => setDialog(null), [])
 
@@ -70,11 +71,12 @@ function Studio() {
     return () => window.removeEventListener('keydown', onKey)
   }, [dialog])
 
-  const load = (p: Project) => {
-    stopSimulation()
-    setNotice(null)
-    loadProject(p)
-    setTimeout(() => fitView({ padding: 0.2 }), 50)
+  const fail = (title: string) => (e: Error) => setNotice({ title, lines: [e.message], error: true })
+
+  /** Every new, imported or opened file becomes its own workflow, so nothing is ever replaced. */
+  const addWorkflow = async (p: Project, imported?: { title: string; lines: string[] }) => {
+    await createWorkflow(p)
+    setNotice(imported ?? null)
   }
 
   const runImport = async (read: () => Promise<ReadResult | null>) => {
@@ -82,13 +84,11 @@ function Studio() {
       const r = await read()
       if (!r) return
       if (!r.files.length) throw new Error('No readable text files were found there.')
-      if (nodes.length && !confirm(`Replace the current harness with “${r.name}”? Save it first if you want to keep it.`)) return
       const { project, notes } = importFiles(r.files, r.name)
-      load(project)
       const skipped = r.skipped
         ? [`Skipped ${r.skipped} file${r.skipped > 1 ? 's' : ''}: binaries, build output, very large or secret-looking files.`]
         : []
-      setNotice({ title: `Imported “${r.name}”`, lines: [...notes, ...skipped] })
+      await addWorkflow(project, { title: `Imported “${r.name}” as a new workflow`, lines: [...notes, ...skipped] })
     } catch (err) {
       setNotice({ title: 'Import failed', lines: [(err as Error).message], error: true })
     }
@@ -97,6 +97,15 @@ function Studio() {
   return (
     <div className="app">
       <header className="toolbar">
+        <button
+          className="small icon-toggle"
+          onClick={() => setShowList((v) => !v)}
+          aria-label={showList ? 'Hide workflows' : 'Show workflows'}
+          aria-expanded={showList}
+          title="Workflows"
+        >
+          ☰
+        </button>
         <div className="brand">
           <img src="/icon.svg" alt="" width={22} height={22} />
           <span>Harness Studio</span>
@@ -110,13 +119,7 @@ function Studio() {
         <div className="menu">
           <button>File ▾</button>
           <div className="menu__items">
-            <button
-              onClick={() => {
-                if (confirm('Start a new harness? The current one is replaced (export it first to keep it).')) load(emptyProject())
-              }}
-            >
-              New harness
-            </button>
+            <button onClick={() => newWorkflow().catch(fail('Could not create a workflow'))}>New workflow</button>
             <button onClick={() => (canPickDirectory() ? runImport(pickDirectory) : folderInput.current?.click())}>
               Import skill folder…
             </button>
@@ -125,12 +128,8 @@ function Studio() {
             <button onClick={() => download(`${slug(name)}.harness.json`, JSON.stringify(toProject(), null, 2), 'application/json')}>
               Save harness.json
             </button>
-            <button
-              onClick={() => {
-                if (confirm('Load the example? The current harness is replaced.')) load(exampleProject())
-              }}
-            >
-              Load example
+            <button onClick={() => addWorkflow(exampleProject()).catch(fail('Could not create a workflow'))}>
+              New from example
             </button>
           </div>
         </div>
@@ -147,9 +146,9 @@ function Studio() {
             e.target.value = ''
             if (!f) return
             try {
-              load(parseProject(await f.text()))
+              await addWorkflow(parseProject(await f.text()), { title: `Opened “${f.name}” as a new workflow`, lines: [] })
             } catch (err) {
-              alert((err as Error).message)
+              fail('Could not open that file')(err as Error)
             }
           }}
         />
@@ -176,6 +175,7 @@ function Studio() {
       </header>
 
       <main className="workspace">
+        {showList && <WorkflowList onError={(m) => setNotice({ title: 'Something went wrong', lines: [m], error: true })} />}
         <div className="canvas">
           <ReactFlow
             nodes={nodes}
@@ -202,13 +202,14 @@ function Studio() {
             <Controls />
             <MiniMap pannable zoomable className="minimap" />
           </ReactFlow>
-          {!nodes.length && (
+          {!ready && <div className="empty">Opening your workflows…</div>}
+          {ready && !nodes.length && (
             <div className="empty">
               <p>Your canvas is empty.</p>
               <p className="muted">Click “+ Add skill” or double-click anywhere to drop your first skill.</p>
             </div>
           )}
-          {(notice || saveFailed) && (
+          {notice && (
             <div className="notices">
               {notice && (
                 <div className={`notice ${notice.error ? 'notice--error' : ''}`} role="status">
@@ -219,16 +220,13 @@ function Studio() {
                       ✕
                     </button>
                   </div>
-                  <ul>
-                    {notice.lines.map((l) => (
-                      <li key={l}>{l}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {saveFailed && (
-                <div className="notice notice--error" role="alert">
-                  This harness is too big for the browser's autosave. Use File → Save harness.json to keep your changes.
+                  {notice.lines.length > 0 && (
+                    <ul>
+                      {notice.lines.map((l) => (
+                        <li key={l}>{l}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </div>

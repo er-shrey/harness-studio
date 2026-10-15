@@ -13,6 +13,9 @@ npm run dev
 
 ## What it does
 
+- **Workflows**: the left sidebar lists every saved workflow. Click to switch, double-click or ✎ to
+  rename, ⧉ to duplicate, ✕ to delete, **+ New** to start one. Names are kept unique. New, imported
+  and opened files always become a new workflow, so nothing is replaced.
 - **Canvas**: add skills (toolbar or double-click), drag between handles to link them, click a
   link's label to set its condition. Empty condition means "always continue".
 - **Skill inspector**: name, description, instructions, attached `.md` / `.yaml` / `.txt` / `.json`
@@ -49,7 +52,10 @@ npm run dev
 
 Unzip into `~/.claude/skills/` (personal) or `.claude/skills/` in a repo.
 
-Work is saved in the browser's local storage. Use **File → Save harness.json** to keep a copy.
+Workflows autosave to IndexedDB in this browser (the last one you had open reopens next time).
+There is no backend yet: data stays in this browser profile, so use **File → Save harness.json** to
+keep a copy elsewhere. All persistence goes through the `WorkflowStorage` interface in
+`src/storage.ts`, so a local or hosted backend can replace IndexedDB later without UI changes.
 
 ## Stack
 

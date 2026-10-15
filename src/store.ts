@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware'
 import {
   addEdge,
   applyEdgeChanges,
@@ -9,7 +8,6 @@ import {
   type NodeChange,
 } from '@xyflow/react'
 import type { Attachment, Connector, FlowEdge, Project, SkillData, SkillNode } from './types'
-import { exampleProject } from './example'
 
 export const uid = () => crypto.randomUUID().slice(0, 8)
 
@@ -71,185 +69,152 @@ type State = Omit<Project, 'version'> & {
   resetSim: () => void
 }
 
-/** localStorage can throw (private mode, blocked storage); never let that break the app. */
-const safeStorage: StateStorage = {
-  getItem: (k) => {
-    try {
-      return localStorage.getItem(k)
-    } catch {
-      return null
-    }
-  },
-  setItem: (k, v) => {
-    try {
-      localStorage.setItem(k, v)
-      window.dispatchEvent(new Event('harness-studio:saved'))
-    } catch {
-      // Usually the quota on a big import; the app shows a banner instead of losing work silently.
-      window.dispatchEvent(new Event('harness-studio:save-failed'))
-    }
-  },
-  removeItem: (k) => {
-    try {
-      localStorage.removeItem(k)
-    } catch {
-      /* ignore */
-    }
-  },
-}
+export const emptyProject = (): Project => ({
+  version: 1,
+  name: 'Untitled harness',
+  description: '',
+  nodes: [],
+  edges: [],
+  connectors: {},
+})
 
 const mapNode = (nodes: SkillNode[], id: string, fn: (d: SkillData) => SkillData) =>
   nodes.map((n) => (n.id === id ? { ...n, data: fn(n.data) } : n))
 
-export const useStore = create<State>()(
-  persist(
-    (set, get) => ({
-      ...exampleProject(),
+export const useStore = create<State>()((set, get) => ({
+  ...emptyProject(),
+  selection: null,
+  sim: idleSim,
+
+  onNodesChange: (changes) => set({ nodes: applyNodeChanges(changes, get().nodes) }),
+  onEdgesChange: (changes) => set({ edges: applyEdgeChanges(changes, get().edges) }),
+  onConnect: (c) => {
+    if (c.source === c.target) return
+    const edge: FlowEdge = { ...c, id: `e-${uid()}`, type: 'condition', data: { condition: '' } } as FlowEdge
+    set({ edges: addEdge(edge, get().edges), selection: { kind: 'edge', id: edge.id } })
+  },
+
+  addSkill: (name, position) => {
+    const id = `s-${uid()}`
+    const n = get().nodes.length
+    const node: SkillNode = {
+      id,
+      type: 'skill',
+      position: position ?? { x: 80 + (n % 4) * 260, y: 80 + Math.floor(n / 4) * 180 },
+      data: { name, description: '', instructions: '', attachments: [], connectorIds: [] },
+    }
+    set({ nodes: [...get().nodes, node], selection: { kind: 'node', id } })
+    return id
+  },
+  updateSkill: (id, patch) => set({ nodes: mapNode(get().nodes, id, (d) => ({ ...d, ...patch })) }),
+  addAttachments: (id, files) =>
+    set({
+      nodes: mapNode(get().nodes, id, (d) => ({
+        ...d,
+        attachments: [...d.attachments, ...files.map((f) => ({ ...f, id: `a-${uid()}` }))],
+      })),
+    }),
+  updateAttachment: (id, attachmentId, patch) =>
+    set({
+      nodes: mapNode(get().nodes, id, (d) => ({
+        ...d,
+        attachments: d.attachments.map((a) => (a.id === attachmentId ? { ...a, ...patch } : a)),
+      })),
+    }),
+  removeAttachment: (id, attachmentId) =>
+    set({
+      nodes: mapNode(get().nodes, id, (d) => ({
+        ...d,
+        attachments: d.attachments.filter((a) => a.id !== attachmentId),
+      })),
+    }),
+  attachConnector: (nodeId, connector) => {
+    const connectors = get().connectors[connector.id]
+      ? get().connectors
+      : { ...get().connectors, [connector.id]: connector }
+    set({
+      connectors,
+      nodes: mapNode(get().nodes, nodeId, (d) =>
+        d.connectorIds.includes(connector.id) ? d : { ...d, connectorIds: [...d.connectorIds, connector.id] },
+      ),
+    })
+  },
+  detachConnector: (nodeId, connectorId) =>
+    set({
+      nodes: mapNode(get().nodes, nodeId, (d) => ({
+        ...d,
+        connectorIds: d.connectorIds.filter((c) => c !== connectorId),
+      })),
+    }),
+  upsertConnector: (connector, previousId) => {
+    const connectors = { ...get().connectors }
+    let nodes = get().nodes
+    if (previousId && previousId !== connector.id) {
+      delete connectors[previousId]
+      nodes = nodes.map((n) => ({
+        ...n,
+        data: { ...n.data, connectorIds: n.data.connectorIds.map((c) => (c === previousId ? connector.id : c)) },
+      }))
+    }
+    connectors[connector.id] = connector
+    set({ connectors, nodes })
+  },
+  removeConnector: (id) => {
+    const connectors = { ...get().connectors }
+    delete connectors[id]
+    set({
+      connectors,
+      nodes: get().nodes.map((n) => ({
+        ...n,
+        data: { ...n.data, connectorIds: n.data.connectorIds.filter((c) => c !== id) },
+      })),
+    })
+  },
+  updateEdge: (id, condition) =>
+    // Writing a condition turns an imported "uses" link into a real routing link.
+    set({ edges: get().edges.map((e) => (e.id === id ? { ...e, data: { ...e.data, condition, kind: undefined } } : e)) }),
+  deleteSelection: () => {
+    const s = get().selection
+    if (!s) return
+    if (s.kind === 'node') {
+      set({
+        nodes: get().nodes.filter((n) => n.id !== s.id),
+        edges: get().edges.filter((e) => e.source !== s.id && e.target !== s.id),
+        selection: null,
+      })
+    } else {
+      set({ edges: get().edges.filter((e) => e.id !== s.id), selection: null })
+    }
+  },
+  select: (selection) => set({ selection }),
+  setMeta: (patch) => set(patch),
+
+  loadProject: (p) =>
+    set({
+      name: p.name,
+      description: p.description,
+      nodes: p.nodes,
+      edges: p.edges,
+      connectors: p.connectors,
       selection: null,
       sim: idleSim,
-
-      onNodesChange: (changes) => set({ nodes: applyNodeChanges(changes, get().nodes) }),
-      onEdgesChange: (changes) => set({ edges: applyEdgeChanges(changes, get().edges) }),
-      onConnect: (c) => {
-        if (c.source === c.target) return
-        const edge: FlowEdge = { ...c, id: `e-${uid()}`, type: 'condition', data: { condition: '' } } as FlowEdge
-        set({ edges: addEdge(edge, get().edges), selection: { kind: 'edge', id: edge.id } })
-      },
-
-      addSkill: (name, position) => {
-        const id = `s-${uid()}`
-        const n = get().nodes.length
-        const node: SkillNode = {
-          id,
-          type: 'skill',
-          position: position ?? { x: 80 + (n % 4) * 260, y: 80 + Math.floor(n / 4) * 180 },
-          data: { name, description: '', instructions: '', attachments: [], connectorIds: [] },
-        }
-        set({ nodes: [...get().nodes, node], selection: { kind: 'node', id } })
-        return id
-      },
-      updateSkill: (id, patch) => set({ nodes: mapNode(get().nodes, id, (d) => ({ ...d, ...patch })) }),
-      addAttachments: (id, files) =>
-        set({
-          nodes: mapNode(get().nodes, id, (d) => ({
-            ...d,
-            attachments: [...d.attachments, ...files.map((f) => ({ ...f, id: `a-${uid()}` }))],
-          })),
-        }),
-      updateAttachment: (id, attachmentId, patch) =>
-        set({
-          nodes: mapNode(get().nodes, id, (d) => ({
-            ...d,
-            attachments: d.attachments.map((a) => (a.id === attachmentId ? { ...a, ...patch } : a)),
-          })),
-        }),
-      removeAttachment: (id, attachmentId) =>
-        set({
-          nodes: mapNode(get().nodes, id, (d) => ({
-            ...d,
-            attachments: d.attachments.filter((a) => a.id !== attachmentId),
-          })),
-        }),
-      attachConnector: (nodeId, connector) => {
-        const connectors = get().connectors[connector.id]
-          ? get().connectors
-          : { ...get().connectors, [connector.id]: connector }
-        set({
-          connectors,
-          nodes: mapNode(get().nodes, nodeId, (d) =>
-            d.connectorIds.includes(connector.id) ? d : { ...d, connectorIds: [...d.connectorIds, connector.id] },
-          ),
-        })
-      },
-      detachConnector: (nodeId, connectorId) =>
-        set({
-          nodes: mapNode(get().nodes, nodeId, (d) => ({
-            ...d,
-            connectorIds: d.connectorIds.filter((c) => c !== connectorId),
-          })),
-        }),
-      upsertConnector: (connector, previousId) => {
-        const connectors = { ...get().connectors }
-        let nodes = get().nodes
-        if (previousId && previousId !== connector.id) {
-          delete connectors[previousId]
-          nodes = nodes.map((n) => ({
-            ...n,
-            data: { ...n.data, connectorIds: n.data.connectorIds.map((c) => (c === previousId ? connector.id : c)) },
-          }))
-        }
-        connectors[connector.id] = connector
-        set({ connectors, nodes })
-      },
-      removeConnector: (id) => {
-        const connectors = { ...get().connectors }
-        delete connectors[id]
-        set({
-          connectors,
-          nodes: get().nodes.map((n) => ({
-            ...n,
-            data: { ...n.data, connectorIds: n.data.connectorIds.filter((c) => c !== id) },
-          })),
-        })
-      },
-      updateEdge: (id, condition) =>
-        // Writing a condition turns an imported "uses" link into a real routing link.
-        set({ edges: get().edges.map((e) => (e.id === id ? { ...e, data: { ...e.data, condition, kind: undefined } } : e)) }),
-      deleteSelection: () => {
-        const s = get().selection
-        if (!s) return
-        if (s.kind === 'node') {
-          set({
-            nodes: get().nodes.filter((n) => n.id !== s.id),
-            edges: get().edges.filter((e) => e.source !== s.id && e.target !== s.id),
-            selection: null,
-          })
-        } else {
-          set({ edges: get().edges.filter((e) => e.id !== s.id), selection: null })
-        }
-      },
-      select: (selection) => set({ selection }),
-      setMeta: (patch) => set(patch),
-
-      loadProject: (p) =>
-        set({
-          name: p.name,
-          description: p.description,
-          nodes: p.nodes,
-          edges: p.edges,
-          connectors: p.connectors,
-          selection: null,
-          sim: idleSim,
-        }),
-      toProject: () => {
-        const { name, description, nodes, edges, connectors } = get()
-        return {
-          version: 1,
-          name,
-          description,
-          // Strip React Flow's runtime fields so harness.json stays clean.
-          nodes: nodes.map(({ id, type, position, data }) => ({ id, type, position, data })) as SkillNode[],
-          edges: edges.map(({ id, source, target, type, data }) => ({ id, source, target, type, data })) as FlowEdge[],
-          connectors,
-        }
-      },
-
-      setSim: (patch) => set({ sim: { ...get().sim, ...patch } }),
-      resetSim: () => set({ sim: { ...idleSim, mode: get().sim.mode } }),
     }),
-    {
-      name: 'harness-studio:project',
-      storage: createJSONStorage(() => safeStorage),
-      partialize: (s) => ({
-        name: s.name,
-        description: s.description,
-        nodes: s.nodes,
-        edges: s.edges,
-        connectors: s.connectors,
-      }),
-    },
-  ),
-)
+  toProject: () => {
+    const { name, description, nodes, edges, connectors } = get()
+    return {
+      version: 1,
+      name,
+      description,
+      // Strip React Flow's runtime fields so harness.json stays clean.
+      nodes: nodes.map(({ id, type, position, data }) => ({ id, type, position, data })) as SkillNode[],
+      edges: edges.map(({ id, source, target, type, data }) => ({ id, source, target, type, data })) as FlowEdge[],
+      connectors,
+    }
+  },
+
+  setSim: (patch) => set({ sim: { ...get().sim, ...patch } }),
+  resetSim: () => set({ sim: { ...idleSim, mode: get().sim.mode } }),
+}))
 
 /** Delete the selected skill or link, asking first when a skill has content that would be lost. */
 export function confirmDelete() {
@@ -271,11 +236,3 @@ export function confirmDelete() {
   deleteSelection()
 }
 
-export const emptyProject = (): Project => ({
-  version: 1,
-  name: 'Untitled harness',
-  description: '',
-  nodes: [],
-  edges: [],
-  connectors: {},
-})

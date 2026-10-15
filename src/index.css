@@ -490,6 +490,111 @@ label.inline input {
   word-break: break-all;
 }
 
+/* Workflow list */
+.workflows {
+  width: 250px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  min-height: 0;
+}
+.workflows__head {
+  padding: 14px 12px 8px;
+}
+.workflows__search {
+  margin: 0 12px 8px;
+  width: auto;
+}
+.workflows ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+.workflows li {
+  position: relative;
+  border-radius: 8px;
+  margin-bottom: 2px;
+}
+.workflows li.active {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.workflows li:hover:not(.active) {
+  background: var(--panel-2);
+}
+.workflows__open {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  padding-right: 84px;
+}
+.workflows__open:hover:not(:disabled) {
+  background: none;
+}
+.workflows__name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workflows li.active .workflows__name {
+  color: var(--primary);
+}
+.workflows__actions {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  gap: 2px;
+}
+.workflows li:hover .workflows__actions,
+.workflows li:focus-within .workflows__actions {
+  display: flex;
+}
+.workflows__actions button {
+  padding: 2px 6px;
+}
+.workflows li.renaming {
+  padding: 6px;
+}
+.workflows li.renaming input {
+  margin: 0;
+}
+.workflows li.renaming .error {
+  font-size: 12px;
+  margin: 4px 2px 0;
+}
+.workflows__empty {
+  padding: 8px 10px;
+}
+.workflows__status {
+  border-top: 1px solid var(--border);
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.workflows__status.error {
+  color: var(--danger);
+}
+.warn-text {
+  display: block;
+  color: var(--warn);
+  margin-top: 4px;
+}
+.icon-toggle {
+  font-size: 15px;
+  padding: 3px 9px;
+}
+
 /* Inspector */
 .inspector {
   width: 340px;
@@ -697,6 +802,15 @@ label.inline input {
 @media (max-width: 820px) {
   .workspace {
     flex-direction: column;
+  }
+  .workflows {
+    width: auto;
+    max-height: 40%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .workflows__actions {
+    display: flex;
   }
   .inspector {
     width: auto;
