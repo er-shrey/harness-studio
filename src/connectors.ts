@@ -2,10 +2,11 @@ import type { Connector, SkillData } from './types'
 
 type CatalogEntry = {
   template: Connector
-  /** Lower-case phrases that suggest this connector when found in a skill. */
+  /**
+   * Lower-case phrases that name the service. Only names count: generic words like "ticket",
+   * "email" or "PR" fit several services and made every step light up with warnings.
+   */
   keywords: string[]
-  /** Case-sensitive whole-word tokens (e.g. "PR"), checked separately. */
-  tokens?: string[]
 }
 
 const VERIFY = 'Template: check the server package or URL and fill in the env vars before use.'
@@ -25,7 +26,7 @@ export const CATALOG: CatalogEntry[] = [
       env: { SLACK_BOT_TOKEN: '${SLACK_BOT_TOKEN}', SLACK_TEAM_ID: '${SLACK_TEAM_ID}' },
       notes: VERIFY,
     },
-    keywords: ['slack', 'channel', 'thread', 'direct message'],
+    keywords: ['slack'],
   },
   {
     template: {
@@ -36,8 +37,7 @@ export const CATALOG: CatalogEntry[] = [
       headers: { Authorization: 'Bearer ${GITHUB_TOKEN}' },
       notes: VERIFY,
     },
-    keywords: ['github', 'pull request', 'pr review', 'code review'],
-    tokens: ['PR', 'PRs'],
+    keywords: ['github'],
   },
   {
     template: {
@@ -58,7 +58,7 @@ export const CATALOG: CatalogEntry[] = [
       url: 'https://mcp.atlassian.com/v1/sse',
       notes: VERIFY,
     },
-    keywords: ['jira', 'confluence', 'atlassian', 'ticket', 'sprint', 'epic'],
+    keywords: ['jira', 'confluence', 'atlassian'],
   },
   {
     template: {
@@ -68,7 +68,8 @@ export const CATALOG: CatalogEntry[] = [
       url: 'https://mcp.linear.app/sse',
       notes: VERIFY,
     },
-    keywords: ['linear'],
+    // "linear" alone is an ordinary word, so only phrases that name the product.
+    keywords: ['linear.app', 'linear issue', 'linear ticket', 'in linear'],
   },
   {
     template: {
@@ -78,7 +79,7 @@ export const CATALOG: CatalogEntry[] = [
       url: 'https://mcp.notion.com/mcp',
       notes: VERIFY,
     },
-    keywords: ['notion'],
+    keywords: ['notion.so', 'notion page', 'notion database', 'in notion'],
   },
   {
     template: {
@@ -88,7 +89,7 @@ export const CATALOG: CatalogEntry[] = [
       command: '<gmail-mcp-server-command>',
       notes: VERIFY,
     },
-    keywords: ['gmail', 'email', 'inbox', 'mail'],
+    keywords: ['gmail'],
   },
   {
     template: {
@@ -98,7 +99,7 @@ export const CATALOG: CatalogEntry[] = [
       command: '<google-drive-mcp-server-command>',
       notes: VERIFY,
     },
-    keywords: ['google drive', 'google doc', 'google sheet', 'spreadsheet'],
+    keywords: ['google drive', 'google doc', 'google docs', 'google sheet', 'google sheets'],
   },
   {
     template: {
@@ -109,7 +110,7 @@ export const CATALOG: CatalogEntry[] = [
       args: ['-y', '@modelcontextprotocol/server-postgres', '${DATABASE_URL}'],
       notes: VERIFY,
     },
-    keywords: ['postgres', 'sql', 'database', 'query the db'],
+    keywords: ['postgres', 'postgresql'],
   },
 ]
 
@@ -131,12 +132,10 @@ export function inferConnectors(data: SkillData): Suggestion[] {
   ]
   const found = new Map<string, Suggestion>()
 
-  for (const { template, keywords, tokens } of CATALOG) {
+  for (const { template, keywords } of CATALOG) {
     for (const src of sources) {
       const lower = src.text.toLowerCase()
-      const kw = keywords.find((k) => new RegExp(`\\b${escapeRe(k)}\\b`).test(lower))
-      const tok = tokens?.find((t) => new RegExp(`\\b${escapeRe(t)}\\b`).test(src.text))
-      const hit = kw ?? tok
+      const hit = keywords.find((k) => new RegExp(`\\b${escapeRe(k)}\\b`).test(lower))
       if (hit) {
         found.set(template.id, { connector: template, reason: `“${hit}” in ${src.label}` })
         break

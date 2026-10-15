@@ -8,6 +8,7 @@ import {
   type NodeChange,
 } from '@xyflow/react'
 import type { Attachment, Connector, FlowEdge, Project, SkillData, SkillNode } from './types'
+import { layout } from './importer'
 
 export const uid = () => crypto.randomUUID().slice(0, 8)
 
@@ -61,6 +62,7 @@ type State = Omit<Project, 'version'> & {
   deleteSelection: () => void
   select: (s: Selection) => void
   setMeta: (patch: { name?: string; description?: string }) => void
+  tidyLayout: () => void
 
   loadProject: (p: Project) => void
   toProject: () => Project
@@ -188,6 +190,7 @@ export const useStore = create<State>()((set, get) => ({
   },
   select: (selection) => set({ selection }),
   setMeta: (patch) => set(patch),
+  tidyLayout: () => set({ nodes: layout(get().nodes, get().edges) }),
 
   loadProject: (p) =>
     set({

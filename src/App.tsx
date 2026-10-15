@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background,
+  ControlButton,
   Controls,
   MarkerType,
   MiniMap,
@@ -36,7 +37,7 @@ function parseProject(text: string): Project {
 }
 
 function Studio() {
-  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addSkill, select, name, toProject } = useStore()
+  const { nodes, edges, onNodesChange, onEdgesChange, onConnect, addSkill, select, name, toProject, tidyLayout } = useStore()
   const { ready, currentId } = useWorkflows()
   const [showList, setShowList] = useState(() => window.innerWidth > 900)
   const { screenToFlowPosition, fitView } = useReactFlow()
@@ -52,7 +53,7 @@ function Studio() {
 
   // Frame the graph whenever a different workflow opens.
   useEffect(() => {
-    if (currentId) setTimeout(() => fitView({ padding: 0.2 }), 50)
+    if (currentId) setTimeout(() => fitView({ padding: 0.2, minZoom: 0.1 }), 50)
   }, [currentId, fitView])
 
   const shownEdges = useMemo(() => edges.map((e) => ({ ...e, markerEnd: arrow })), [edges])
@@ -70,6 +71,11 @@ function Studio() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [dialog])
+
+  const tidy = () => {
+    tidyLayout()
+    setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 30)
+  }
 
   const fail = (title: string) => (e: Error) => setNotice({ title, lines: [e.message], error: true })
 
@@ -125,6 +131,7 @@ function Studio() {
             </button>
             <button onClick={() => zipInput.current?.click()}>Import skill .zip…</button>
             <button onClick={() => importInput.current?.click()}>Open harness.json…</button>
+            <button onClick={tidy}>Tidy layout</button>
             <button onClick={() => download(`${slug(name)}.harness.json`, JSON.stringify(toProject(), null, 2), 'application/json')}>
               Save harness.json
             </button>
@@ -195,11 +202,16 @@ function Studio() {
             zoomOnDoubleClick={false}
             deleteKeyCode={null}
             fitView
-            fitViewOptions={{ padding: 0.2 }}
+            fitViewOptions={{ padding: 0.2, minZoom: 0.1 }}
+            minZoom={0.1}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={20} />
-            <Controls />
+            <Controls fitViewOptions={{ padding: 0.15, minZoom: 0.1 }}>
+              <ControlButton onClick={tidy} title="Tidy layout" aria-label="Tidy layout">
+                ⇶
+              </ControlButton>
+            </Controls>
             <MiniMap pannable zoomable className="minimap" />
           </ReactFlow>
           {!ready && <div className="empty">Opening your workflows…</div>}

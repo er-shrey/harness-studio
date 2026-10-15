@@ -223,6 +223,8 @@ function findLinks(units: Unit[], plugin: string): FlowEdge[] {
 
 const COL = 340
 const ROW = 150
+/** Columns per band: longer flows wrap onto a new band below, like lines of text. */
+const MAX_COLS = 5
 
 /**
  * Left-to-right layered layout: each node sits one column after its deepest predecessor
@@ -282,13 +284,19 @@ export function layout(nodes: SkillNode[], edges: FlowEdge[]): SkillNode[] {
 
   const pos = new Map<string, { x: number; y: number }>()
   const tallest = Math.max(0, ...columns.map((c) => c?.length ?? 0))
+  const bandHeight = (tallest + 0.8) * ROW
+  const bands = Math.ceil(columns.length / MAX_COLS)
   columns.forEach((col, x) =>
-    col.forEach((id, y) => pos.set(id, { x: x * COL, y: (y + (tallest - col.length) / 2) * ROW })),
+    col.forEach((id, y) =>
+      pos.set(id, {
+        x: (x % MAX_COLS) * COL,
+        y: Math.floor(x / MAX_COLS) * bandHeight + (y + (tallest - col.length) / 2) * ROW,
+      }),
+    ),
   )
-  const perRow = Math.max(4, columns.length)
-  lonely.forEach((id, i) =>
-    pos.set(id, { x: (i % perRow) * COL, y: (tallest + 0.6 + Math.floor(i / perRow)) * ROW }),
-  )
+  const perRow = Math.max(4, Math.min(columns.length, MAX_COLS))
+  const lonelyTop = bands ? bands * bandHeight - 0.2 * ROW : 0
+  lonely.forEach((id, i) => pos.set(id, { x: (i % perRow) * COL, y: lonelyTop + Math.floor(i / perRow) * ROW }))
 
   return nodes.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position }))
 }

@@ -40,7 +40,8 @@ function SkillNodeView({ id, data, selected }: NodeProps<SkillNode>) {
         ))}
         {missing.length > 0 && (
           <span className="chip chip--warn" title={missing.map((m) => `${m.connector.label}: ${m.reason}`).join('\n')}>
-            ⚠ needs {missing.map((m) => m.connector.label).join(', ')}
+            ⚠ needs {missing[0].connector.label}
+            {missing.length > 1 ? ` +${missing.length - 1}` : ''}
           </span>
         )}
       </div>
