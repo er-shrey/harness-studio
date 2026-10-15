@@ -264,6 +264,8 @@ label.inline input {
   --xy-controls-button-color: var(--text);
   --xy-controls-button-border-color: var(--border);
   --xy-minimap-background-color: var(--panel);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg) 70%, transparent);
+  --xy-minimap-node-background-color: var(--border);
   --xy-edge-stroke: var(--muted);
 }
 .react-flow__handle {

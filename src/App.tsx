@@ -53,7 +53,7 @@ function Studio() {
 
   // Frame the graph whenever a different workflow opens.
   useEffect(() => {
-    if (currentId) setTimeout(() => fitView({ padding: 0.2, minZoom: 0.1 }), 50)
+    if (currentId) setTimeout(() => fitView({ padding: 0.2, minZoom: 0.1, maxZoom: 1 }), 50)
   }, [currentId, fitView])
 
   const shownEdges = useMemo(() => edges.map((e) => ({ ...e, markerEnd: arrow })), [edges])
@@ -74,7 +74,7 @@ function Studio() {
 
   const tidy = () => {
     tidyLayout()
-    setTimeout(() => fitView({ padding: 0.15, duration: 300 }), 30)
+    setTimeout(() => fitView({ padding: 0.15, minZoom: 0.1, maxZoom: 1, duration: 300 }), 30)
   }
 
   const fail = (title: string) => (e: Error) => setNotice({ title, lines: [e.message], error: true })
@@ -202,12 +202,12 @@ function Studio() {
             zoomOnDoubleClick={false}
             deleteKeyCode={null}
             fitView
-            fitViewOptions={{ padding: 0.2, minZoom: 0.1 }}
+            fitViewOptions={{ padding: 0.2, minZoom: 0.1, maxZoom: 1 }}
             minZoom={0.1}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={20} />
-            <Controls fitViewOptions={{ padding: 0.15, minZoom: 0.1 }}>
+            <Controls fitViewOptions={{ padding: 0.15, minZoom: 0.1, maxZoom: 1 }}>
               <ControlButton onClick={tidy} title="Tidy layout" aria-label="Tidy layout">
                 ⇶
               </ControlButton>
